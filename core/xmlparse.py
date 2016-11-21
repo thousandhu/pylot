@@ -11,6 +11,7 @@
 #    for more details.
 #
 
+import traceback
 
 from string import Template
 try:
@@ -33,6 +34,8 @@ def load_xml_string_cases(tc_xml_blob):
 def load_xml_cases(tc_xml_filename):
     # parse xml and load request queue with corey.engine.Request objects
     # variant to load the xml from a file (the default shell behavior)
+    # with open(tc_xml_filename, 'r') as my_xml_file:
+    #     dom = etree.parse(my_xml_file)
     dom = etree.parse(tc_xml_filename)
     cases = load_xml_cases_dom(dom)
     return cases
@@ -57,7 +60,7 @@ def load_xml_cases_dom(dom):
             for element in child:
                 if element.tag.lower() == 'url':
                     req.url = element.text
-                if element.tag.lower() == 'method': 
+                if element.tag.lower() == 'method':
                     req.method = element.text
                 if element.tag.lower() == 'body':
                     file_payload = element.attrib.get('file')
@@ -65,11 +68,11 @@ def load_xml_cases_dom(dom):
                         req.body = open(file_payload, 'rb').read()
                     else:
                         req.body = element.text
-                if element.tag.lower() == 'verify': 
+                if element.tag.lower() == 'verify':
                     req.verify = element.text
-                if element.tag.lower() == 'verify_negative': 
+                if element.tag.lower() == 'verify_negative':
                     req.verify_negative = element.text
-                if element.tag.lower() == 'timer_group': 
+                if element.tag.lower() == 'timer_group':
                     req.timer_group = element.text
                 if element.tag.lower() == 'add_header':
                     # this protects against headers that contain colons
@@ -77,8 +80,12 @@ def load_xml_cases_dom(dom):
                     x = splat[0].strip()
                     del splat[0]
                     req.add_header(x, ''.join(splat).strip())
-            req = resolve_parameters(req, param_map)  # substitute vars
-            cases.append(req)
+            try:
+                req = resolve_parameters(req, param_map)  # substitute vars
+                cases.append(req)
+            except Exception, e:
+                print e
+
     return cases
 
 
@@ -86,6 +93,7 @@ def resolve_parameters(req, param_map):
     # substitute variables based on parameter mapping
     req.url = Template(req.url).substitute(param_map)
     req.body = Template(req.body).substitute(param_map)
+
     for header in req.headers:
         req.headers[header] = Template(req.headers[header]).substitute(param_map)
     return req

@@ -28,6 +28,7 @@ import urlparse
 from threading import Thread
 import config
 import results
+import random
 
 
 
@@ -211,59 +212,95 @@ class LoadAgent(Thread):  # each Agent/VU runs in its own thread
         
         while self.running:
             self.cookie_jar = cookielib.CookieJar()
-            for req in self.msg_queue:
+            while True:
+                req = self.msg_queue[random.randint(0,len(self.msg_queue)-1)]
                 for repeat in range(req.repeat):
                     if self.running:
-
                         # send the request message
                         resp, content, req_start_time, req_end_time, connect_end_time = self.send(req)
-
                         # get times for logging and error display
                         tmp_time = time.localtime()
                         cur_date = time.strftime('%d %b %Y', tmp_time)
                         cur_time = time.strftime('%H:%M:%S', tmp_time)
-                        
                         # check verifications and status code for errors
                         is_error = False
                         if resp.code >= 400 or resp.code == 0:
                             is_error = True
                         if not req.verify == '':
-                            if not re.search(req.verify, content, re.DOTALL): 
+                            if not re.search(req.verify, content, re.DOTALL):
                                 is_error = True
                         if not req.verify_negative == '':
                             if re.search(req.verify_negative, content, re.DOTALL):
                                 is_error = True
-                    
-                        if is_error:                    
+                        if is_error:
                             self.error_count += 1
                             error_string = 'Agent %s:  %s - %d %s,  url: %s' % (self.id + 1, cur_time, resp.code, resp.msg, req.url)
                             self.error_queue.append(error_string)
                             log_tuple = (self.id + 1, cur_date, cur_time, req_end_time, req.url.replace(',', ''), resp.code, resp.msg.replace(',', ''))
                             self.log_error('%s,%s,%s,%s,%s,%s,%s' % log_tuple)  # write as csv
-                            
                         resp_bytes = len(content)
                         latency = (req_end_time - req_start_time)
                         connect_latency = (connect_end_time - req_start_time)
-                        
                         self.count += 1
                         total_bytes += resp_bytes
                         total_latency += latency
                         total_connect_latency += connect_latency
-                        
                         # update shared stats dictionary
                         self.runtime_stats[self.id] = StatCollection(resp.code, resp.msg, latency, self.count, self.error_count, total_latency, total_connect_latency, total_bytes)
                         self.runtime_stats[self.id].agent_start_time = agent_start_time
-                        
                         # put response stats/info on queue for reading by the consumer (ResultWriter) thread
                         q_tuple = (self.id + 1, cur_date, cur_time, req_end_time, req.url.replace(',', ''), resp.code, resp.msg.replace(',', ''), resp_bytes, latency, connect_latency, req.timer_group)
                         self.results_queue.put(q_tuple)
-                            
                         expire_time = (self.interval - latency)
                         if expire_time > 0:
                             time.sleep(expire_time)  # sleep remainder of interval so we keep even pacing
-                    
                     else:  # don't go through entire range if stop has been called
-                        break
+                        return
+
+
+            # for req in self.msg_queue:
+            #     for repeat in range(req.repeat):
+            #         if self.running:
+            #             # send the request message
+            #             resp, content, req_start_time, req_end_time, connect_end_time = self.send(req)
+            #             # get times for logging and error display
+            #             tmp_time = time.localtime()
+            #             cur_date = time.strftime('%d %b %Y', tmp_time)
+            #             cur_time = time.strftime('%H:%M:%S', tmp_time)
+            #             # check verifications and status code for errors
+            #             is_error = False
+            #             if resp.code >= 400 or resp.code == 0:
+            #                 is_error = True
+            #             if not req.verify == '':
+            #                 if not re.search(req.verify, content, re.DOTALL):
+            #                     is_error = True
+            #             if not req.verify_negative == '':
+            #                 if re.search(req.verify_negative, content, re.DOTALL):
+            #                     is_error = True
+            #             if is_error:
+            #                 self.error_count += 1
+            #                 error_string = 'Agent %s:  %s - %d %s,  url: %s' % (self.id + 1, cur_time, resp.code, resp.msg, req.url)
+            #                 self.error_queue.append(error_string)
+            #                 log_tuple = (self.id + 1, cur_date, cur_time, req_end_time, req.url.replace(',', ''), resp.code, resp.msg.replace(',', ''))
+            #                 self.log_error('%s,%s,%s,%s,%s,%s,%s' % log_tuple)  # write as csv
+            #             resp_bytes = len(content)
+            #             latency = (req_end_time - req_start_time)
+            #             connect_latency = (connect_end_time - req_start_time)
+            #             self.count += 1
+            #             total_bytes += resp_bytes
+            #             total_latency += latency
+            #             total_connect_latency += connect_latency
+            #             # update shared stats dictionary
+            #             self.runtime_stats[self.id] = StatCollection(resp.code, resp.msg, latency, self.count, self.error_count, total_latency, total_connect_latency, total_bytes)
+            #             self.runtime_stats[self.id].agent_start_time = agent_start_time
+            #             # put response stats/info on queue for reading by the consumer (ResultWriter) thread
+            #             q_tuple = (self.id + 1, cur_date, cur_time, req_end_time, req.url.replace(',', ''), resp.code, resp.msg.replace(',', ''), resp_bytes, latency, connect_latency, req.timer_group)
+            #             self.results_queue.put(q_tuple)
+            #             expire_time = (self.interval - latency)
+            #             if expire_time > 0:
+            #                 time.sleep(expire_time)  # sleep remainder of interval so we keep even pacing
+            #         else:  # don't go through entire range if stop has been called
+            #             break
         
         
     def stop(self):
@@ -281,7 +318,7 @@ class LoadAgent(Thread):  # each Agent/VU runs in its own thread
         else:
             opener = urllib2.build_opener()
         if req.method.upper() == 'POST':
-            request = urllib2.Request(req.url, req.body, req.headers)
+            request = urllib2.Request(req.url, req.body.encode("utf-8"), req.headers)
         else:  
             request = urllib2.Request(req.url, None, req.headers)  # urllib2 assumes a GET if no data is supplied.  PUT and DELETE are not supported
         
